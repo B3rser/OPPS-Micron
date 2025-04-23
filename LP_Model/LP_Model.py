@@ -270,6 +270,11 @@ for q in quarters_unique:
         model += X23C[(q, w)] == 5 * k23C, f"Modulo5_X23C_{q}_{w}"
 
 # -------------
+
+# -------------
+
+
+# -------------
 #Ejecucion del modelo
 # -------------
 # Resolver el modelo
@@ -286,10 +291,35 @@ print("Valor óptimo (Total Yielded Supply):", lp.value(model.objective))
 #    if v.varValue is not None and v.varValue != 0:
 #        print(v.name, "=", v.varValue)
 # -------------
+#Almacenar los resultados en excel 
 # -------------
+# Crear una lista de diccionarios con los resultados
+results = []
 
-# -------------
-# -------------
+for v in model.variables():
+    if v.varValue is not None and v.varValue != 0:
+        results.append({
+            "Variable": v.name,
+            "Valor": v.varValue
+        })
+
+# Convertir a DataFrame
+df_variables  = pd.DataFrame(results)
+# 📏 Restricciones
+constraints = []
+for name, constraint in model.constraints.items():
+    constraints.append({
+        "Nombre": name,
+        "Restricción": str(constraint)
+    })
+df_constraints = pd.DataFrame(constraints)
+# Guardar en Excel
+output_path = "resultados_modelo.xlsx"
+with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
+    df_variables.to_excel(writer, sheet_name="Variables", index=False)
+    df_constraints.to_excel(writer, sheet_name="Restricciones", index=False)
+
+print(f" Resultados guardados en: {output_path}")
 
 # -------------
 # -------------
