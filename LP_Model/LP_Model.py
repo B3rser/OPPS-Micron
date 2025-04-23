@@ -112,12 +112,13 @@ weeks_per_quarter = {
     quarter: dfbound[quarter].columns.tolist()
     for quarter in quarters
 }
+
 # Definir variables de decisión
 
 # Variables semanales de producción: X21Aij, X22Bij, X23Cij
-X21A = lp.LpVariable.dicts("X21A", ((q, w) for q in quarters for w in weeks_per_quarter[q]), lowBound=0, cat='Continuous')
-X22B = lp.LpVariable.dicts("X22B", ((q, w) for q in quarters for w in weeks_per_quarter[q]), lowBound=0, cat='Continuous')
-X23C = lp.LpVariable.dicts("X23C", ((q, w) for q in quarters for w in weeks_per_quarter[q]), lowBound=0, cat='Continuous')
+X21A = lp.LpVariable.dicts("X21A", ((q, w) for q in quarters for w in weeks_per_quarter[q]), lowBound=0, cat='Integer')
+X22B = lp.LpVariable.dicts("X22B", ((q, w) for q in quarters for w in weeks_per_quarter[q]), lowBound=0, cat='Integer')
+X23C = lp.LpVariable.dicts("X23C", ((q, w) for q in quarters for w in weeks_per_quarter[q]), lowBound=0, cat='Integer')
 
 # Variables trimestrales de producción: X21Ai, X22Bi, X23Ci
 X21A_q = lp.LpVariable.dicts("X21A_q", quarters, lowBound=0, cat='Integer')
@@ -132,16 +133,159 @@ YS23C = lp.LpVariable.dicts("YS23C", quarters, lowBound=0, cat='Integer')
 # Función objetivo: Minimizar el Yielded Supply total
 model += lp.lpSum([YS21A[q] + YS22B[q] + YS23C[q] for q in quarters]), "Minimize_Total_YS"
 #print(model)
-#Restricciones 
+# -------------
+# Restricciones 
+# -------------
+
+quarters_unique = quarters.drop_duplicates()
+# -------------
 #Minimo de produccion x week 
+# -------------
+
 names_set = set()
 
-for q in quarters:
+for q in quarters_unique:
     for w in weeks_per_quarter[q]:
         constraint_name = f"Min_Production_Week_{q}_{w}"
-        if constraint_name in names_set:
-            print("⚠️ Nombre duplicado:", constraint_name)
-        names_set.add(constraint_name)
 
-        
-print(model)
+        if constraint_name not in names_set:
+            model += (
+                X21A[(q, w)] + X22B[(q, w)] + X23C[(q, w)] >= 350,
+                constraint_name
+            )
+            names_set.add(constraint_name)
+# -------------
+#Maximo de produccion x week
+# -------------
+
+# Set para verificar nombres únicos
+constraint_names = set()
+
+for quarter in quarters_unique:
+    weeks = weeks_per_quarter[quarter]
+    week_names = dfbound[quarter].columns.tolist()
+    week_index_map = {week: idx for idx, week in enumerate(week_names)}
+    
+    for week in weeks:
+        idx = week_index_map[week]
+        available_21A = boundaryConditions[quarter]["21A"]["Available"][idx]
+        available_22B = boundaryConditions[quarter]["22B"]["Available"][idx]
+        available_23C = boundaryConditions[quarter]["23C"]["Available"][idx]
+
+        # Función para generar un nombre único
+        def unique_name(base):
+            if base not in constraint_names:
+                constraint_names.add(base)
+                return base
+            i = 1
+            while f"{base}_{i}" in constraint_names:
+                i += 1
+            new_name = f"{base}_{i}"
+            constraint_names.add(new_name)
+            return new_name
+
+        # Agregar restricciones con nombres únicos
+        model += X21A[(quarter, week)] <= available_21A, unique_name(f"MaxProd_21A_{quarter}_{week}")
+        model += X22B[(quarter, week)] <= available_22B, unique_name(f"MaxProd_22B_{quarter}_{week}")
+        model += X23C[(quarter, week)] <= available_23C, unique_name(f"MaxProd_23C_{quarter}_{week}")
+
+# -------------
+#Inventario minimo y maximo en bytes por wafer por quarter
+# -------------
+# Para evitar duplicados en nombres de restricciones
+inv_names_set = set()
+
+# Restricciones de inventario mínimo y máximo con nombres únicos
+for quarter in quarters_unique:
+    constraints = [
+        (YS21A[quarter] * 94500 >= 70_000_000, f"InvMin_21A_{quarter}"),
+        (YS21A[quarter] * 94500 <= 140_000_000, f"InvMax_21A_{quarter}"),
+        (YS22B[quarter] * 69300 >= 70_000_000, f"InvMin_22B_{quarter}"),
+        (YS22B[quarter] * 69300 <= 140_000_000, f"InvMax_22B_{quarter}"),
+        (YS23C[quarter] * 66850 >= 70_000_000, f"InvMin_23C_{quarter}"),
+        (YS23C[quarter] * 66850 <= 140_000_000, f"InvMax_23C_{quarter}")
+    ]
+
+    for constraint, name in constraints:
+        unique_name = name
+        counter = 1
+        while unique_name in inv_names_set:
+            unique_name = f"{name}_{counter}"
+            counter += 1
+        inv_names_set.add(unique_name)
+        model += constraint, unique_name
+
+# -------------
+#Ramp Up (no mayor a 500)
+# -------------
+# Conjunto para verificar nombres duplicados
+names_set = set()
+# Conjunto para evitar duplicación de nombres de restricciones
+names_set = set()
+
+# Función para extraer el número de semana como entero
+def get_week_number(week_str):
+    match = re.search(r'\d+', week_str)
+    return int(match.group()) if match else None
+
+for q in quarters_unique:
+    # Ordenar las semanas numéricamente
+    weeks = sorted(weeks_per_quarter[q], key=lambda w: get_week_number(w))
+    for i in range(1, len(weeks)):  # Empezamos desde la segunda semana
+        current_week = weeks[i]
+        prev_week = weeks[i - 1]
+
+        # Nombres únicos
+        ramp_up_name_21A = f"RampUp_X21A_{q}_{current_week}"
+        ramp_up_name_22B = f"RampUp_X22B_{q}_{current_week}"
+        ramp_up_name_23C = f"RampUp_X23C_{q}_{current_week}"
+
+        # Solo agregar si el nombre no ha sido usado
+        if ramp_up_name_21A not in names_set:
+            names_set.add(ramp_up_name_21A)
+            model += (X21A[(q, current_week)] - X21A[(q, prev_week)] <= 560), ramp_up_name_21A
+
+        if ramp_up_name_22B not in names_set:
+            names_set.add(ramp_up_name_22B)
+            model += (X22B[(q, current_week)] - X22B[(q, prev_week)] <= 560), ramp_up_name_22B
+
+        if ramp_up_name_23C not in names_set:
+            names_set.add(ramp_up_name_23C)
+            model += (X23C[(q, current_week)] - X23C[(q, prev_week)] <= 560), ramp_up_name_23C
+
+# -------------
+# Todas la producciones deben de ser modulos de 5
+# -------------
+for q in quarters_unique:
+    for w in weeks_per_quarter[q]:
+        # Variables auxiliares para el múltiplo
+        k21A = lp.LpVariable(f"K21A_{q}_{w}", cat="Integer")
+        k22B = lp.LpVariable(f"K22B_{q}_{w}", cat="Integer")
+        k23C = lp.LpVariable(f"K23C_{q}_{w}", cat="Integer")
+
+        # Restricciones para forzar múltiplos de 5
+        model += X21A[(q, w)] == 5 * k21A, f"Modulo5_X21A_{q}_{w}"
+        model += X22B[(q, w)] == 5 * k22B, f"Modulo5_X22B_{q}_{w}"
+        model += X23C[(q, w)] == 5 * k23C, f"Modulo5_X23C_{q}_{w}"
+
+# -------------
+#Ejecucion del modelo
+# -------------
+
+# -------------
+# -------------
+
+# -------------
+# -------------
+
+# -------------
+# -------------
+
+# -------------
+# -------------
+
+
+#print(model)
+for name, constraint in model.constraints.items():
+    print(f"{name}: {constraint}")
+
