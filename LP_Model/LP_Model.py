@@ -104,6 +104,8 @@ waferPlan = {
     "23C": dfwafer.iloc[2].tolist()
 }
 
+
+quarters_unique = quarters.drop_duplicates()
 #Hacer el modelo en plup
 # Definir el problema
 model = lp.LpProblem("Wafer_Production_Model", lp.LpMinimize)
@@ -116,9 +118,9 @@ weeks_per_quarter = {
 # Definir variables de decisión
 
 # Variables semanales de producción: X21Aij, X22Bij, X23Cij
-X21A = lp.LpVariable.dicts("X21A", ((q, w) for q in quarters for w in weeks_per_quarter[q]), lowBound=0, cat='Integer')
-X22B = lp.LpVariable.dicts("X22B", ((q, w) for q in quarters for w in weeks_per_quarter[q]), lowBound=0, cat='Integer')
-X23C = lp.LpVariable.dicts("X23C", ((q, w) for q in quarters for w in weeks_per_quarter[q]), lowBound=0, cat='Integer')
+X21A = lp.LpVariable.dicts("X21A", ((q, w) for q in quarters_unique for w in weeks_per_quarter[q]), lowBound=0, cat='Integer')
+X22B = lp.LpVariable.dicts("X22B", ((q, w) for q in quarters_unique for w in weeks_per_quarter[q]), lowBound=0, cat='Integer')
+X23C = lp.LpVariable.dicts("X23C", ((q, w) for q in quarters_unique for w in weeks_per_quarter[q]), lowBound=0, cat='Integer')
 
 # Variables trimestrales de producción: X21Ai, X22Bi, X23Ci
 X21A_q = lp.LpVariable.dicts("X21A_q", quarters, lowBound=0, cat='Integer')
@@ -131,13 +133,12 @@ YS22B = lp.LpVariable.dicts("YS22B", quarters, lowBound=0, cat='Integer')
 YS23C = lp.LpVariable.dicts("YS23C", quarters, lowBound=0, cat='Integer')
 
 # Función objetivo: Minimizar el Yielded Supply total
-model += lp.lpSum([YS21A[q] + YS22B[q] + YS23C[q] for q in quarters]), "Minimize_Total_YS"
+model += lp.lpSum([YS21A[q] + YS22B[q] + YS23C[q] for q in quarters_unique]), "Minimize_Total_YS"
 #print(model)
 # -------------
 # Restricciones 
 # -------------
 
-quarters_unique = quarters.drop_duplicates()
 # -------------
 #Minimo de produccion x week 
 # -------------
@@ -271,6 +272,21 @@ for q in quarters_unique:
 # -------------
 #Ejecucion del modelo
 # -------------
+# Resolver el modelo
+model.solve()
+
+# Verificar el estado de la solución
+print("Estado del modelo:", lp.LpStatus[model.status])
+
+# Imprimir el valor de la función objetivo
+print("Valor óptimo (Total Yielded Supply):", lp.value(model.objective))
+
+# Si quieres imprimir los valores de todas las variables:
+#for v in model.variables():
+#    if v.varValue is not None and v.varValue != 0:
+#        print(v.name, "=", v.varValue)
+# -------------
+# -------------
 
 # -------------
 # -------------
@@ -281,11 +297,8 @@ for q in quarters_unique:
 # -------------
 # -------------
 
-# -------------
-# -------------
 
-
-#print(model)
-for name, constraint in model.constraints.items():
-    print(f"{name}: {constraint}")
+#print(model.objective)
+#for name, constraint in model.constraints.items():
+#    print(f"{name}: {constraint}")
 
