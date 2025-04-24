@@ -133,8 +133,7 @@ B21A = lp.LpVariable.dicts("B21A", ((q, w) for q in quarters_unique for w in wee
 B22B = lp.LpVariable.dicts("B22B", ((q, w) for q in quarters_unique for w in weeks_per_quarter[q]), cat="Binary")
 B23C = lp.LpVariable.dicts("B23C", ((q, w) for q in quarters_unique for w in weeks_per_quarter[q]), cat="Binary")
 
-# Función objetivo: Minimizar el Yielded Supply total
-model += lp.lpSum([YS21A[q] + YS22B[q] + YS23C[q] for q in quarters_unique]), "Minimize_Total_YS"
+
 #print(model)
 # -------------
 # Restricciones 
@@ -356,13 +355,23 @@ for q in quarters_unique:
         model += X23C[(q, w)] == 5 * k23C, f"Modulo5_X23C_{q}_{w}"
 
 # -------------
-
+#Al final de la planeacion debe ser 0
 # -------------
+#last_q = quarters_unique.iloc[-1]
+#for product in ['21A', '22B', '23C']:
+#    model += ESST[(product, last_q)] == 0, f"ESST_Zero_Final_{product}"
 
 #--------------
 #El exceso se pasa a la siguiente producto
 #--------------
 
+
+#--------------
+#Agregar a la funcion objetvio 
+last_q = quarters_unique.iloc[-1]
+# Función objetivo: Minimizar el Yielded Supply total
+weight_ESST = 1.0
+model += lp.lpSum(([YS21A[q] + YS22B[q] + YS23C[q] for q in quarters_unique]) + ESST[(product, last_q)] for product in ['21A', '22B', '23C']) , "Minimize_YS_and_Final_ESST"
 # -------------
 #Ejecucion del modelo
 # -------------
@@ -521,20 +530,20 @@ for v in model.variables():
         })
 
 # Convertir a DataFrame
-#df_variables  = pd.DataFrame(results)
+df_variables  = pd.DataFrame(results)
 # 📏 Restricciones
-#constraints = []
-#for name, constraint in model.constraints.items():
-#    constraints.append({
-#        "Nombre": name,
-#        "Restricción": str(constraint)
-#    })
-#df_constraints = pd.DataFrame(constraints)
+constraints = []
+for name, constraint in model.constraints.items():
+    constraints.append({
+        "Nombre": name,
+        "Restricción": str(constraint)
+    })
+df_constraints = pd.DataFrame(constraints)
 # Guardar en Excel
-#output_path = "resultados_modelo.xlsx"
-#with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
-#    df_variables.to_excel(writer, sheet_name="Variables", index=False)
-#    df_constraints.to_excel(writer, sheet_name="Restricciones", index=False)
+output_path = "resultados_modelo.xlsx"
+with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
+    df_variables.to_excel(writer, sheet_name="Variables", index=False)
+    df_constraints.to_excel(writer, sheet_name="Restricciones", index=False)
 
 #print(f" Resultados guardados en: {output_path}")
 
