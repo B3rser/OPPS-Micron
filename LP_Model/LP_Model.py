@@ -5,7 +5,6 @@ from itertools import cycle
 import re
 import math
 
-
 # Cargar el archivo Excel una sola vez
 excel_file = pd.ExcelFile('./Hackaton DB Final 04.21.xlsx')
 
@@ -150,18 +149,12 @@ SST = {}
 ESST = {}
 
 # Diccionario auxiliar para acceder al YS correspondiente por producto
-# Diccionario auxiliar para acceder al YS correspondiente por producto
-# Diccionario auxiliar para acceder al YS correspondiente por producto
 ys_vars = {
     "21A": YS21A,
     "22B": YS22B,
     "23C": YS23C
 }
 
-# Variables para almacenar cálculos dinámicos
-TP = {}
-SST = {}
-ESST = {}
 
 # Convertir quarters_unique a lista y asegurarse de que esté ordenada correctamente
 quarters_list = sorted(quarters_unique.tolist(), key=lambda x: (int(x.split()[1]), int(x[1])))
@@ -192,12 +185,13 @@ for product in ['21A', '22B', '23C']:
             model += TP[(product, quarter)] == TP_initial + ys_q * dens, f"TP_init_{product}_{quarter}"
         else:  # Quarters subsiguientes
             prev_q = quarters_list[i-1]
-            model += TP[(product, quarter)] == TP[(product, prev_q)] + ys_q * dens, f"TP_dyn_{product}_{quarter}"
+            ed = data[quarter][product].get("ED", 0)
+            model += TP[(product, quarter)] == TP[(product, prev_q)] - ed + ys_q * dens, f"TP_dyn_{product}_{quarter}"
 
         # ESST (Excess Safety Stock Target)
         ESST[(product, quarter)] = lp.LpVariable(f"ESST_{product}_{quarter}", lowBound=0)
         ed_q = data[quarter][product].get("ED", 0)
-        model += ESST[(product, quarter)] == TP[(product, quarter)] - SST[(product, quarter)] - ed_q, f"ESST_calc_{product}_{quarter}"
+        model += ESST[(product, quarter)] == TP[(product, quarter)] - SST[(product, quarter)] - ed_q + ys_q * dens, f"ESST_calc_{product}_{quarter}"
 # -------------
 #Definir Quarters unique
 # -------------
@@ -287,7 +281,6 @@ def get_previous_quarter(current_quarter):
     else:
         return f"Q{quarter_number - 1} {year_suffix:02d}"
 
-# Restricciones de inventario mínimo y máximo con nombres únicos
 for quarter in quarters_unique:
     # Producto 21A
     TP_prev_21A = safe_number(data.get(get_previous_quarter(quarter), {}).get("21A", {}).get("TP", 0))
@@ -366,6 +359,9 @@ for q in quarters_unique:
 
 # -------------
 
+#--------------
+#El exceso se pasa a la siguiente producto
+#--------------
 
 # -------------
 #Ejecucion del modelo
@@ -373,19 +369,35 @@ for q in quarters_unique:
 # Resolver el modelo
 model.solve()
 
+# Crear copia del DataFrame original para modificarlo
+df_updated = df.copy()
+
+# Mapeo de producto a filas
+product_rows = {
+    "21A": {"YS": 0, "SST": 1, "SSTW": 2, "ED": 3, "TP": 4, "ESST": 5},
+    "22B": {"YS": 6, "SST": 7, "SSTW": 8, "ED": 9, "TP": 10, "ESST": 11},
+    "23C": {"YS": 12, "SST": 13, "SSTW": 14, "ED": 15, "TP": 16, "ESST": 17},
+}
+
+# Escribir los valores en el DataFrame
+for quarter in quarters_list:
+    for product in ["21A", "22B", "23C"]:
+        df_updated.loc[product_rows[product]["YS"], quarter] = lp.value(ys_vars[product][quarter]*density_wafer[product])
+        df_updated.loc[product_rows[product]["SST"], quarter] = lp.value(SST[(product, quarter)])
+        df_updated.loc[product_rows[product]["TP"], quarter] = lp.value(TP[(product, quarter)])
+        df_updated.loc[product_rows[product]["ESST"], quarter] = lp.value(ESST[(product, quarter)])
+
+# Guardar en un nuevo archivo de Excel
+with pd.ExcelWriter("Hackaton DB Resultados.xlsx", engine="openpyxl", mode="w") as writer:
+    df_updated.to_excel(writer, sheet_name="Supply_Demand", index=False)
+
 # Verificar el estado de la solución
 print("Estado del modelo:", lp.LpStatus[model.status])
 
 # Imprimir el valor de la función objetivo
 print("Valor óptimo (Total Yielded Supply):", lp.value(model.objective))
 
-# Si quieres imprimir los valores de todas las variables:
-#for v in model.variables():
-#    if v.varValue is not None and v.varValue != 0:
-#        print(v.name, "=", v.varValue)
-# -------------
-#Almacenar los resultados en excel 
-# -------------
+
 
 # Limpiar strings
 dfbound_raw.iloc[:, 0] = dfbound_raw.iloc[:, 0].astype(str).str.strip()
