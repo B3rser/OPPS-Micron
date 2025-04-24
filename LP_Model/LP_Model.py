@@ -96,7 +96,7 @@ dfwafer_raw = dfwafer_raw.iloc[:, 1:]  # quitar columna A
 quarters = dfwafer_raw.iloc[0]
 weeks = dfwafer_raw.iloc[1]
 #multi_index = pd.MultiIndex.from_arrays([quarters, weeks], names=["Quarter", "Week"])
-print(multi_index)
+#print(multi_index)
 
 
 
@@ -127,6 +127,13 @@ YS21A = lp.LpVariable.dicts("YS21A", quarters, lowBound=0, cat='Integer')
 YS22B = lp.LpVariable.dicts("YS22B", quarters, lowBound=0, cat='Integer')
 YS23C = lp.LpVariable.dicts("YS23C", quarters, lowBound=0, cat='Integer')
 
+M = 1e6
+
+#Variables Binarias
+B21A = lp.LpVariable.dicts("B21A", ((q, w) for q in quarters_unique for w in weeks_per_quarter[q]), cat="Binary")
+B22B = lp.LpVariable.dicts("B22B", ((q, w) for q in quarters_unique for w in weeks_per_quarter[q]), cat="Binary")
+B23C = lp.LpVariable.dicts("B23C", ((q, w) for q in quarters_unique for w in weeks_per_quarter[q]), cat="Binary")
+
 # Función objetivo: Minimizar el Yielded Supply total
 model += lp.lpSum([YS21A[q] + YS22B[q] + YS23C[q] for q in quarters_unique]), "Minimize_Total_YS"
 #print(model)
@@ -134,8 +141,65 @@ model += lp.lpSum([YS21A[q] + YS22B[q] + YS23C[q] for q in quarters_unique]), "M
 # Restricciones 
 # -------------
 
+
+#--------------
+#Actualizacion dinamica de los valores de supply demand 
+#--------------
+TP = {}
+SST = {}
+ESST = {}
+
+# Diccionario auxiliar para acceder al YS correspondiente por producto
+# Diccionario auxiliar para acceder al YS correspondiente por producto
+# Diccionario auxiliar para acceder al YS correspondiente por producto
+ys_vars = {
+    "21A": YS21A,
+    "22B": YS22B,
+    "23C": YS23C
+}
+
+# Variables para almacenar cálculos dinámicos
+TP = {}
+SST = {}
+ESST = {}
+
+# Convertir quarters_unique a lista y asegurarse de que esté ordenada correctamente
+quarters_list = sorted(quarters_unique.tolist(), key=lambda x: (int(x.split()[1]), int(x[1])))
+
+# Iteramos sobre los productos
+for product in ['21A', '22B', '23C']:
+    for i, quarter in enumerate(quarters_list):
+        ys_q = ys_vars[product][quarter]  # Variable de Yielded Supply
+        dens = density_wafer[product]  # Densidad por wafer
+        
+        # SST (Safety Stock Target)
+        SST[(product, quarter)] = lp.LpVariable(f"SST_{product}_{quarter}", lowBound=0)
+        
+        if i < len(quarters_list) - 1:  # No es el último quarter
+            next_q = quarters_list[i+1]
+            ed_next = data[next_q][product].get("ED", 0)
+            sstw = data[quarter][product].get("SSTW", 0)
+            model += SST[(product, quarter)] == sstw * (ed_next / 13), f"SST_calc_{product}_{quarter}"
+        else:  # Último quarter
+            model += SST[(product, quarter)] == 0, f"SST_last_{product}_{quarter}"
+
+        # TP (Total Projected Inventory Balance)
+        TP[(product, quarter)] = lp.LpVariable(f"TP_{product}_{quarter}", lowBound=0)
+        
+        if i == 0:  # Primer quarter
+            raw_tp = data[quarter][product].get("TP", 0)
+            TP_initial = 0 if pd.isna(raw_tp) else raw_tp
+            model += TP[(product, quarter)] == TP_initial + ys_q * dens, f"TP_init_{product}_{quarter}"
+        else:  # Quarters subsiguientes
+            prev_q = quarters_list[i-1]
+            model += TP[(product, quarter)] == TP[(product, prev_q)] + ys_q * dens, f"TP_dyn_{product}_{quarter}"
+
+        # ESST (Excess Safety Stock Target)
+        ESST[(product, quarter)] = lp.LpVariable(f"ESST_{product}_{quarter}", lowBound=0)
+        ed_q = data[quarter][product].get("ED", 0)
+        model += ESST[(product, quarter)] == TP[(product, quarter)] - SST[(product, quarter)] - ed_q, f"ESST_calc_{product}_{quarter}"
 # -------------
-#Minimo de produccion x week 
+#Definir Quarters unique
 # -------------
 
 names_set = set()
@@ -150,6 +214,22 @@ for q in quarters_unique:
                 constraint_name
             )
             names_set.add(constraint_name)
+#--------------
+#Prioridad de llenado 
+#--------------
+
+# Restricciones de prioridad
+for q in quarters_unique:
+    for w in weeks_per_quarter[q]:
+        # X21A se activa solo si B21A está activa
+        model += X21A[(q, w)] <= M * B21A[(q, w)], f"ProdIfB21A_{q}_{w}"
+        # X22B solo se activa si B21A está activa y B22B también
+        model += X22B[(q, w)] <= M * B22B[(q, w)], f"ProdIfB22B_{q}_{w}"
+        model += B22B[(q, w)] <= B21A[(q, w)], f"Prioridad22B_{q}_{w}"
+        # X23C solo se activa si B21A y B22B están activas y B23C también
+        model += X23C[(q, w)] <= M * B23C[(q, w)], f"ProdIfB23C_{q}_{w}"
+        model += B23C[(q, w)] <= B22B[(q, w)], f"Prioridad23C_1_{q}_{w}"
+        model += B23C[(q, w)] <= B21A[(q, w)], f"Prioridad23C_2_{q}_{w}"
 # -------------
 #Maximo de produccion x week
 # -------------
