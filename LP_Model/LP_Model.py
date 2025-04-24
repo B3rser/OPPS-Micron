@@ -327,8 +327,7 @@ index_22B = get_index('22B', 'Scheduled Capacity')
 index_23C = get_index('23C', 'Scheduled Capacity')
 
 # Mapear a columnas por Quarter y Semana
-print(quarter)
-print(week)
+
 column_map = {
     (quarter, week): col_idx
     for col_idx, (quarter, week) in enumerate(multi_index, start=0)  # empieza desde la col C (índice 2)
@@ -365,6 +364,50 @@ def actualizar_scheduled(index_fila, variable_dict, nombre_var):
             total_fallidos += 1
 
     print(f"✅ Finalizó {nombre_var}: {total_escritos} valores escritos, {total_fallidos} con problemas.")
+
+# Calcular Over/Under y Totales
+index_total_available = get_index("Total", "Available Capacity")
+index_total_scheduled = get_index("Total", "Scheduled Capacity")
+index_total_over = get_index("Total", "Over/Under Capacity")
+
+index_available = {
+    "21A": get_index("21A", "Available Capacity"),
+    "22B": get_index("22B", "Available Capacity"),
+    "23C": get_index("23C", "Available Capacity")
+}
+index_scheduled = {
+    "21A": get_index("21A", "Scheduled Capacity"),
+    "22B": get_index("22B", "Scheduled Capacity"),
+    "23C": get_index("23C", "Scheduled Capacity")
+}
+index_over = {
+    "21A": get_index("21A", "Over/Under Capacity"),
+    "22B": get_index("22B", "Over/Under Capacity"),
+    "23C": get_index("23C", "Over/Under Capacity")
+}
+
+# Calcular todos los valores
+for (quarter, week), _ in X21A.items():
+    key = (str(quarter).strip(), str(week).strip())
+    col_idx = column_map.get(key)
+    if col_idx is None:
+        continue
+
+    total_available = 0
+    total_scheduled = 0
+
+    for prod in ["21A", "22B", "23C"]:
+        av = dfbound_raw.iat[index_available[prod], col_idx]
+        sc = dfbound_raw.iat[index_scheduled[prod], col_idx]
+        if pd.notna(av) and pd.notna(sc):
+            dfbound_raw.iat[index_over[prod], col_idx] = round(sc - av, 2)
+            total_available += av
+            total_scheduled += sc
+
+    dfbound_raw.iat[index_total_available, col_idx] = round(total_available, 2)
+    dfbound_raw.iat[index_total_scheduled, col_idx] = round(total_scheduled, 2)
+    dfbound_raw.iat[index_total_over, col_idx] = round(total_scheduled - total_available, 2)
+
 
 # Actualizar valores
 actualizar_scheduled(index_21A, X21A, "X21A")
